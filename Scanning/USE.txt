@@ -1,0 +1,10 @@
+roslaunch turtlebot_gazebo turtlebot_world.launch
+roslaunch turtlebot_gazebo amcl_demo.launch map_file:=/home/alienbot/Documents/ros/my_workspace/src/partial_detection/src/mymap.yaml
+roslaunch turtlebot_rviz_launchers view_navigation.launch
+roslaunch turtlebot_rviz_launchers view_robot.launch
+
+python main.py 
+
+cd '/home/alienbot/Documents/ros/my_workspace/src/trashcan_proj/src'
+python trashcan_scanner.py
+roslaunch turtlebot_teleop keyboard_teleop.launch
