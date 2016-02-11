@@ -1,0 +1,318 @@
+#!/usr/bin/env python
+
+import rospy
+import numpy as np
+import os
+import sys
+from cv2 import * 
+
+from std_msgs.msg import String
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist
+from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge, CvBridgeError
+from kobuki_msgs.msg import BumperEvent
+from actionlib_msgs.msg import GoalStatusArray
+from imreg import *
+import copy
+
+import time
+
+class GoForward():
+	def __init__(self):
+		rospy.init_node('GoForward', anonymous=False)
+
+		rospy.loginfo("To stop TurtleBot CTRL + C")  
+		rospy.on_shutdown(self.shutdown)
+	
+		###----------- IMAGE ----------###
+		# turtlebot
+		#self.image_sub = rospy.Subscriber("/camera/depth/image",Image, self.callback, queue_size = 1)
+		# gazebo
+		#self.image_sub = rospy.Subscriber("/camera/rgb/image_raw",Image, self.callback, queue_size = 1)
+		#self.image_sub = rospy.Subscriber("/camera/depth/image_raw",Image, self.callback, queue_size = 1)
+		self.bridge = CvBridge()
+		self.time = time.time()
+		
+
+		rospy.Subscriber('scan', LaserScan, self.laser_callback, queue_size = 1)
+		
+		#print scan
+		scan = np.random.uniform(low=-10.0, high=10.0, size=(640,1))
+		self.scanim = self.scan2im(scan)
+		self.counter = 0
+
+		self.r = rospy.Rate(10);
+		
+		self.move_cmd = Twist()
+		#self.move_cmd.linear.x = 0.2
+		#self.move_cmd.angular.z = 0
+
+		self.bridge = CvBridge()
+		
+		while not rospy.is_shutdown():
+			#self.cmd_vel.publish(self.move_cmd)
+			self.r.sleep()
+			
+	def shutdown(self):
+		rospy.loginfo("Stop TurtleBot")
+		self.move_cmd.linear.x = 0.0
+		self.cmd_vel.publish(self.move_cmd)
+		rospy.sleep(1)
+
+
+	def laser_callback(self, scan):
+		#def getPosition(self, scan):
+		# Build a depths array to rid ourselves of any nan data inherent in scan.ranges.
+		#self.move_cmd.linear.x = 0.2
+		#self.move_cmd.angular.z = 0
+		depths = []
+		max_scan = -1
+		too_close = 1
+		for dist in scan.ranges:
+			if np.isnan(dist):
+				depths.append(max_scan)
+			else:
+				depths.append(dist)
+				'''
+				if dist<too_close:
+					#self.move_cmd.linear.x=0
+					self.turn()
+					break
+				'''
+
+		# convert scan to image
+		self.scan = self.scan2im(depths)
+
+		# find center of object
+		im0 = imread('image1.png',0)
+		i0_bin = im0>50
+		cy,cx = np.nonzero(i0_bin)
+		mcx = np.mean(cx)
+		mcy = np.mean(cy)
+		#i0center = copy.deepcopy(im0)
+		#print cy,cy+5, cx,cx+5, i0center.shape
+		#i0center[mcy:mcy+5,mcx:mcx+5]=255
+		m, n = np.shape(im0)
+		centerscan = np.zeros((m,n))
+		a1 = np.max([0, np.floor(mcy)-m/2])
+		a2 = np.min([m/2+np.floor(mcy), m])
+		b1 = np.max([0, np.floor(mcx)-n/2])
+		b2 = np.min([n/2+np.floor(mcx), n])
+
+		tmp = im0[a1:a2,b1:b2]
+		mm, nn = np.shape(tmp);
+		centerscan[m/2-np.floor(mm/2)-1:m/2+np.floor(mm/2),n/2-np.floor(nn/2):n/2+np.floor(nn/2)] = tmp;
+
+		# load map
+		im_map = imread('mymap.pgm',0)
+		im_mapB = im_map>240
+		conv_map = im_map<10
+
+		# rotation
+		step = 10
+		prob_map = np.zeros(np.shape(conv_map))
+		prob_map = prob_map.astype(np.float32)
+		for angle in range(0,360,step):
+			#angle = 35
+			M = getRotationMatrix2D((m/2,n/2),angle,1)
+			rotscan = warpAffine(centerscan,M,(m,n))	
+			
+			dst = filter2D(conv_map.astype(np.float32),-1,rotscan.astype(np.float32))
+			conv_im = dst.astype(np.float32)/np.max(dst.reshape(np.size(dst),1))
+			conv_im = conv_im*255
+			conv_im8 = conv_im.astype(np.uint8)
+			
+			prob_map = np.maximum(prob_map.astype(np.float32),conv_im)
+		#print np.max(prob_map.reshape(np.size(prob_map),1))
+
+		prob_map = prob_map*im_mapB
+		
+		prob_map = prob_map.astype(np.float32)/np.max(prob_map.reshape(np.size(prob_map),1))
+		prob_map = prob_map*255
+		prob_map = prob_map.astype(np.uint8)
+		
+
+		# extract scene
+		'''
+		scene = (i2-i0)*255.0 
+		scene[scene<0] = 0.0;
+		scene = scene.astype(np.uint8)	
+		
+		i0255 = i0*255
+		gray = i0255.astype(np.uint8)
+		rgb = cvtColor(gray,COLOR_GRAY2BGR)
+		circle(rgb, (cx,cy), 5, cv.Scalar(255, 255, 0)) 
+		
+
+		h0 = np.zeros((hist.size,2))
+		h0[:,0] = np.array(hist)
+		h0[:,1] = np.array(bin_edges[:-1])
+		#np.save('hist', np.array(h0))
+
+		h1 = cv.fromarray(h0.astype(np.float32))
+		h2 = cv.fromarray(target_hist.astype(np.float32))
+		
+		#visualize
+		imcat = np.hstack((i0*255.0,self.scan))
+		imcat = np.hstack((imcat,i2*255.0))
+		#imcat = np.hstack((imcat,scene))
+		#imcat = np.hstack((imcat,i0center*255))
+		
+
+		imwrite('model.png', newim)
+		'''
+
+		imshow("scan", prob_map)
+		waitKey(1)
+		
+
+	def callback(self, image):
+		try:
+			cv_image = self.bridge.imgmsg_to_cv2(image)
+		except CvBridgeError, e:
+			print e
+
+		#print 'fps: ', 1.0/(time.time()-self.time)
+		#self.time = time.time()
+
+		imshow("Test", cv_image)
+		#cv2.imshow("Test", rgb_im)
+
+		waitKey(1)
+
+
+	def scan2im(self, s):
+		# get angle
+		nums =range(640)
+		nums = np.asarray(nums)+0.0
+		nums[:] = (nums - 320.0)/640.0#[(x - 320.0)/640.0 for x in nums]
+		fov = .34
+		nums[:] = nums*(fov*np.pi)#[x*(.34*np.pi) for x in nums]
+		nums = nums.reshape(nums.size,1)
+
+		# remove nans
+		#print "s",s
+		tmp1 = s>0
+		valids = []
+		validnum = []
+		#print np.size(s) 640
+		for i in range(np.size(s)):
+			if s[i]>0:
+				valids.append(s[i])
+				validnum.append(nums[i])
+		valids = np.array(valids)
+		valids = valids.reshape(np.size(valids),1)
+		validnum = np.array(validnum)
+		validnum  = validnum .reshape(np.size(validnum ),1)
+
+
+		# convert to cartesian
+		#print np.shape(validnum), np.shape(valids) (639, 1) (639, 1)
+		ex, why = pol2cart(validnum,valids)
+		# make an image
+		imsize = 100
+		im = np.zeros((imsize,imsize))
+
+		ex = ex-np.min(ex) 
+		why = why-np.min(why) 
+
+		tmp = np.array([np.max(ex), np.max(why)])
+		maxval = np.max(tmp)
+		ex = ex*((imsize-1.0)/maxval)
+		why = why*((imsize-1.0)/maxval)
+		
+		#print ex.shape (639, 1)
+		for i in range(np.size(ex)):
+			# make sure value falls in valid range 0-99
+			'''
+			if i>= np.size(ex) or i>=np.size(why):
+				print i,
+				print": ",why,ex,"  MERP!"
+			else:
+				print i,
+				print": ",why,ex,"  ",": ",why[i,0],ex[i,0],"  ",
+			'''
+			tmp = np.array([why[i,0],0])
+			y = int(np.max(tmp))
+			tmp = np.array([ex[i,0],0])
+			x = int(np.max(tmp))
+			
+			im[imsize-1-y,x] = 255#1;
+
+		return im
+
+def cart2pol(x, y):
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return(rho, phi)
+
+def pol2cart(phi, r):
+    x = r * np.cos(phi)
+    y = r * np.sin(phi)
+    return(x, y)
+
+if __name__ == '__main__':
+	np.set_printoptions(precision=3)
+	#np.set_printoptions(suppress=True)
+	try:
+		GoForward()
+	except:
+		rospy.loginfo("GoForward node terminated.")
+
+
+"""
+x =[73
+    41
+   414
+   454];
+
+
+y = [67
+   419
+   453
+   102];
+
+    x: -8.45665740967
+    y: 8.29424667358
+    z: 0.0
+
+    x: -10.0367622375
+    y: -8.99524307251
+    z: 0.0
+
+    x: 8.50370979309
+    y: -10.7191762924
+    z: 0.0
+
+    x: 10.3052682877
+    y: 6.62971973419
+    z: 0.0
+
+TEST
+x =
+
+   133
+
+
+y =
+
+   372
+
+x =    [73  41    414    454];
+y = [67     419     453    102];
+X =[-8.45665740967 -10.0367622375 8.50370979309 10.3052682877];
+Y = [8.29424667358 -8.99524307251 -10.7191762924 6.62971973419];   
+P = [x y ones(4,1)]
+M = [X' Y'];
+tr =  P\M
+
+tr =
+
+    0.0494    0.0000
+    0.0003   -0.0493
+  -12.1264   11.6210
+X = np.array([[0.0494, 0.0000], [0.0003, -0.0493],[-12.1264, 11.6210]])
+
+"""
