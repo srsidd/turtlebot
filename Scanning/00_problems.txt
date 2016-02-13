@@ -1,0 +1,11 @@
+-----------spinning robot-------------
+PROBLEM: When using acml for navigation, the turtlebot will sometimes follow the path to goal by spinning around continuously
+SOLUTION: It seems to have something to do with the parameters that specify how closely it follows a policy, 
+how to change the parameters:
+/opt/ros/indigo/share/turtlebot_navigation/param/dwa_local_planner_params.yaml
+I thought i should change path_distance_bias (but this didn't seem to help)
+dropped goal_distance_bias to 5.0
+raised forward_point_distance to .5
+i also raised max_scaling_factor to .3 because it sometimes gets too close to walls (and I hope this well help that)
+
+------

@@ -24,3 +24,6 @@ at any time to give amcl a pose estimate.  This is most commonly done
 by clicking in rviz, because it's easy to visually check the result 
 (e.g., by comparing rendered laser scans with the map).  But you can 
 send this message from any node. 
+
+
+
