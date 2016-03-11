@@ -6,6 +6,10 @@ cd /home/alienbot/Documents/turtlebot/my_workspace/src/turtlebot/Scanning
 python auto_trashcan_scanner.py
 
 --------------------
+
+roslaunch turtlebot_navigation amcl_demo.launch map_file:=/home/alienbot/Documents/turtlebot/my_workspace/src/turtlebot/Scanning/grasplab/my_map.yaml
+
+
 roslaunch turtlebot_rviz_launchers view_robot.launch
 
 roslaunch turtlebot_teleop keyboard_teleop.launch
